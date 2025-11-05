@@ -364,7 +364,7 @@ def prompt_moderate(req: func.HttpRequest) -> func.HttpResponse:
 
             moderate_response = requests.post(moderate_url, headers=moderate_headers, json=moderate_body)
             moderate_result = moderate_response.json()
-
+            
             # Extract severity scores from the 4 categories
             categories = moderate_result.get("categoriesAnalysis", [])
             severities = [cat["severity"] for cat in categories]
@@ -499,14 +499,36 @@ def utils_welcome(documents: func.DocumentList) -> None:
 
         for doc in documents:
             # Check if this is a new player registration (games_played == 0 and total_score == 0)
-            # This helps distinguish between registration and updates
             if doc.get("games_played") == 0 and doc.get("total_score") == 0:
                 username = doc.get("username")
 
-                
+                # Check if a welcome prompt already exists for this user
+                try:
+                    welcome_check_query = f"SELECT * FROM c WHERE c.username = '{username}'"
+                    existing_prompts = list(prompt_container.query_items(
+                        query=welcome_check_query,
+                        enable_cross_partition_query=True
+                    ))
+
+                    # Filter to check for welcome messages (empty tags and contains welcome text)
+                    existing_welcome = []
+                    for p in existing_prompts:
+                        if len(p.get('tags', [])) == 0:
+                            for text_obj in p.get('texts', []):
+                                if 'welcome to comp3207' in text_obj.get('text', '').lower():
+                                    existing_welcome.append(p)
+                                    break
+
+                    # Skip if welcome already exists
+                    if len(existing_welcome) > 0:
+                        logging.info(f"Welcome prompt already exists for user: {username}, skipping creation")
+                        continue
+                except Exception as check_error:
+                    logging.warning(f"Error checking for existing welcome prompt: {str(check_error)}")
+                    # Continue to create welcome even if check fails
+
                 welcome_text = f"Welcome to COMP3207, {username}"
 
-                
                 supported_languages = ['en', 'cy', 'es', 'ta', 'zh-Hans', 'ar']
 
                 # Start with English
@@ -529,18 +551,19 @@ def utils_welcome(documents: func.DocumentList) -> None:
                         translated_text = translate_result[0]['translations'][0]['text']
                         texts.append({"text": translated_text, "language": target_lang})
 
-                
                 welcome_prompt = {
                     "id": str(uuid.uuid4()),
                     "username": username,
                     "texts": texts,
-                    "tags": []  
+                    "tags": []
                 }
 
-                
-                prompt_container.create_item(body=welcome_prompt)
+                prompt_container.create_item(body=welcome_prompt,)
+
 
                 logging.info(f"Welcome prompt created for user: {username}")
 
     except Exception as e:
         logging.error(f"Error in utils_welcome: {str(e)}")
+
+
